@@ -1,0 +1,230 @@
+@import "tailwindcss";
+
+/* -------------------------------------------------------------
+ * BASE THEME VARIABLES & RESET
+ * ----------------------------------------------------------- */
+:root {
+  --bg-page: #0b0f19;
+  --bg-surface: #0f172a;
+  --bg-subtle: #020617;
+  --border-subtle: #1e293b;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --accent-gold: #f59e0b;
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* -------------------------------------------------------------
+ * LIGHT THEME COMPREHENSIVE OVERRIDES
+ * Clean, high-contrast, modern Indian FinTech / SEBI portal style
+ * ----------------------------------------------------------- */
+html[data-theme="light"],
+[data-theme="light"] body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Main background wrapper */
+[data-theme="light"] .min-h-screen.bg-slate-900 {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Navigation Header */
+[data-theme="light"] header {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+/* Cards & Surface Containers */
+[data-theme="light"] .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .bg-slate-950,
+[data-theme="light"] .bg-slate-950\/80,
+[data-theme="light"] .bg-slate-950\/70,
+[data-theme="light"] .bg-slate-950\/60 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .bg-slate-900\/80,
+[data-theme="light"] .bg-slate-900\/90 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .bg-slate-800,
+[data-theme="light"] .bg-slate-800\/80 {
+  background-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Borders */
+[data-theme="light"] .border-slate-800,
+[data-theme="light"] .border-slate-800\/80,
+[data-theme="light"] .border-slate-700 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Typography Contrast in Light Mode */
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-slate-100 {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .text-slate-200 {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .text-slate-300 {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .text-slate-400 {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Inputs, Textareas & Form elements */
+[data-theme="light"] textarea,
+[data-theme="light"] input[type="text"] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] textarea::placeholder,
+[data-theme="light"] input::placeholder {
+  color: #94a3b8 !important;
+}
+
+[data-theme="light"] textarea:focus,
+[data-theme="light"] input:focus {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2) !important;
+}
+
+/* Buttons in Light Mode */
+[data-theme="light"] button.bg-slate-800,
+[data-theme="light"] button.bg-slate-900 {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] button.bg-slate-800:hover,
+[data-theme="light"] button.bg-slate-900:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* Action Links and Badges */
+[data-theme="light"] .bg-amber-500\/10,
+[data-theme="light"] .bg-amber-500\/15,
+[data-theme="light"] .bg-amber-500\/20 {
+  background-color: #fef3c7 !important;
+  border-color: #fcd34d !important;
+}
+
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-amber-300,
+[data-theme="light"] .text-amber-200 {
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .text-emerald-400,
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-200 {
+  color: #047857 !important;
+}
+
+[data-theme="light"] .bg-emerald-500\/15,
+[data-theme="light"] .bg-emerald-500\/20 {
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+/* Traffic-Light Alert Cards in Light Mode */
+[data-theme="light"] .bg-rose-950\/40,
+[data-theme="light"] .bg-rose-950\/50,
+[data-theme="light"] .bg-rose-950\/60,
+[data-theme="light"] .bg-rose-950\/70 {
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+}
+
+[data-theme="light"] .text-rose-400,
+[data-theme="light"] .text-rose-300,
+[data-theme="light"] .text-rose-200 {
+  color: #9f1239 !important;
+}
+
+[data-theme="light"] .bg-rose-500\/15,
+[data-theme="light"] .bg-rose-500\/20 {
+  background-color: #ffe4e6 !important;
+  border-color: #fda4af !important;
+}
+
+[data-theme="light"] .bg-amber-950\/40,
+[data-theme="light"] .bg-amber-950\/50 {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+
+[data-theme="light"] .bg-emerald-950\/40,
+[data-theme="light"] .bg-emerald-950\/50,
+[data-theme="light"] .bg-emerald-950\/30 {
+  background-color: #f0fdf4 !important;
+  border-color: #bbf7d0 !important;
+}
+
+/* Quoted Signal Snippets in Light Mode */
+[data-theme="light"] .bg-slate-900\/90.border {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Footer & Sub-bars */
+[data-theme="light"] footer {
+  background-color: #ffffff !important;
+  border-top-color: #e2e8f0 !important;
+}
+
+/* Modals & Dialogs */
+[data-theme="light"] .fixed.inset-0 .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Navigation items in Light Mode */
+[data-theme="light"] nav button {
+  color: #475569 !important;
+}
+
+[data-theme="light"] nav button:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] nav button.bg-amber-500 {
+  background-color: #f59e0b !important;
+  color: #0f172a !important;
+}
+
+/* Pre & Code blocks */
+[data-theme="light"] pre {
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+}

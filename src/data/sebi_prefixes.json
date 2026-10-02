@@ -1,0 +1,86 @@
+[
+  {
+    "prefix": "INZ",
+    "category": "Stock Broker",
+    "categoryHi": "स्टॉक ब्रोकर",
+    "example": "INZ000031633",
+    "authority": "SEBI / Exchanges"
+  },
+  {
+    "prefix": "INA",
+    "category": "Investment Adviser",
+    "categoryHi": "इन्वेस्टमेंट एडवाइजर",
+    "example": "INA000017523",
+    "authority": "SEBI / BSE Administration & Supervision (BASL)"
+  },
+  {
+    "prefix": "INH",
+    "category": "Research Analyst",
+    "categoryHi": "रिसर्च एनालिस्ट",
+    "example": "INH000000211",
+    "authority": "SEBI / RA Administration"
+  },
+  {
+    "prefix": "INP",
+    "category": "Portfolio Manager",
+    "categoryHi": "पोर्टफोलियो मैनेजर (PMS)",
+    "example": "INP000006721",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "INF",
+    "category": "Mutual Fund",
+    "categoryHi": "म्यूचुअल फंड (AMC)",
+    "example": "MF/020/94/8 or INF...",
+    "authority": "SEBI Mutual Funds Dept"
+  },
+  {
+    "prefix": "INM",
+    "category": "Merchant Banker",
+    "categoryHi": "मर्चेंट बैंकर",
+    "example": "INM000010361",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "IND",
+    "category": "Depository",
+    "categoryHi": "डिपॉजिटरी (NSDL / CDSL)",
+    "example": "IND000000001",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "IN-DP",
+    "category": "Depository Participant",
+    "categoryHi": "डिपॉजिटरी पार्टिसिपेंट",
+    "example": "IN-DP-NSDL-12-96",
+    "authority": "NSDL / CDSL / SEBI"
+  },
+  {
+    "prefix": "INR",
+    "category": "Registrar & Share Transfer Agent (RTA)",
+    "categoryHi": "रजिस्ट्रार और ट्रांसफर एजेंट",
+    "example": "INR000004058",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "IN/CRA",
+    "category": "Credit Rating Agency",
+    "categoryHi": "क्रेडिट रेटिंग एजेंसी",
+    "example": "IN/CRA/001/1999",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "IN/AIF",
+    "category": "Alternative Investment Fund",
+    "categoryHi": "अल्टरनेटिव इन्वेस्टमेंट फंड (AIF)",
+    "example": "IN/AIF1/17-18/0312",
+    "authority": "SEBI"
+  },
+  {
+    "prefix": "IN/DT",
+    "category": "Debenture Trustee",
+    "categoryHi": "डिबेंचर ट्रस्टी",
+    "example": "INDT00000001",
+    "authority": "SEBI"
+  }
+]

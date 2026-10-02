@@ -1,0 +1,10 @@
+{
+  "name": "Ruko - Investor Safety Companion",
+  "description": "A pause-and-verify companion for first-time Indian investors in Tier-2/3 cities to evaluate messages, stock tips, and unverified schemes.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
