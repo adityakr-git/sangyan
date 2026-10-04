@@ -18,12 +18,15 @@ const getDirname = () => {
   return process.cwd();
 };
 
-// Candidate multimodal Gemini models (2.0-flash and 1.5-flash)
+// Candidate multimodal Gemini models
 export const CANDIDATE_GEMINI_MODELS = [
   process.env.GEMINI_MODEL,
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
   'gemini-2.0-flash',
   'gemini-1.5-flash',
-  'gemini-2.5-flash',
 ].filter(Boolean) as string[];
 
 /**
