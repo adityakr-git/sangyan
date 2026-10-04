@@ -2,8 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const getDirname = () => {
+  if (typeof __dirname !== 'undefined' && __dirname) return __dirname;
+  if (typeof import.meta !== 'undefined' && import.meta && import.meta.url) {
+    try {
+      return path.dirname(fileURLToPath(import.meta.url));
+    } catch {
+      // fallback
+    }
+  }
+  return process.cwd();
+};
 
 export interface SebiIntermediary {
   regNumber: string;
@@ -90,7 +99,21 @@ let cachedPrefixes: SebiPrefix[] | null = null;
 function loadData() {
   if (cachedEntities) return;
 
-  const dataDir = path.resolve(__dirname, '../data');
+  const currentDir = getDirname();
+  const candidateDirs = [
+    path.resolve(currentDir, '../data'),
+    path.resolve(currentDir, 'src/data'),
+    path.resolve(process.cwd(), 'src/data'),
+    path.resolve(process.cwd(), 'data'),
+  ];
+
+  let dataDir = candidateDirs[0];
+  for (const dir of candidateDirs) {
+    if (fs.existsSync(path.join(dir, 'sebi_entities.json'))) {
+      dataDir = dir;
+      break;
+    }
+  }
 
   try {
     const entPath = path.join(dataDir, 'sebi_entities.json');

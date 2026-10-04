@@ -3,12 +3,20 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
 import { z } from 'zod';
-import Tesseract from 'tesseract.js';
 import { analyzeWithRuleEngine, AnalysisSignal } from '../services/ruleEngine';
 import { searchSebi } from '../services/sebiSearchService';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const getDirname = () => {
+  if (typeof __dirname !== 'undefined' && __dirname) return __dirname;
+  if (typeof import.meta !== 'undefined' && import.meta && import.meta.url) {
+    try {
+      return path.dirname(fileURLToPath(import.meta.url));
+    } catch {
+      // fallback
+    }
+  }
+  return process.cwd();
+};
 
 // Candidate multimodal Gemini models (2.0-flash and 1.5-flash)
 export const CANDIDATE_GEMINI_MODELS = [
@@ -29,7 +37,7 @@ export async function extractTextWithTesseract(imageBuffer: Buffer, timeoutMs = 
     }
 
     const rootDir = process.cwd();
-    const candidateDirs = [rootDir, path.resolve(rootDir, 'dist'), __dirname];
+    const candidateDirs = [rootDir, path.resolve(rootDir, 'dist'), getDirname()];
     let langPath: string | undefined = undefined;
 
     for (const dir of candidateDirs) {
@@ -40,6 +48,8 @@ export async function extractTextWithTesseract(imageBuffer: Buffer, timeoutMs = 
     }
 
     const langOptions: Record<string, unknown> = langPath ? { langPath } : {};
+
+    const { default: Tesseract } = await import('tesseract.js');
 
     return await Promise.race([
       (async () => {
