@@ -38,6 +38,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState<string>('image/jpeg');
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Real-time client-side masking calculation
   const maskingResult = maskSensitiveData(rawText);
@@ -114,22 +116,75 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   };
 
-  // Image Upload Handler
-  const handleImageSelect = (file: File) => {
+  // Image File Validation & Selection Handler
+  const validateAndSetImage = (file: File) => {
+    setImageError(null);
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validMimes.includes(file.type.toLowerCase()) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      setImageError(
+        lang === 'hi'
+          ? 'अमान्य फाइल प्रकार: कृपया केवल JPG, JPEG, PNG या WebP इमेज चुनें।'
+          : 'Invalid file format: Please select a JPG, JPEG, PNG, or WebP image.'
+      );
+      return;
+    }
+
+    const maxSizeBytes = 10 * 1024 * 1024; // 10 MB limit
+    if (file.size > maxSizeBytes) {
+      setImageError(
+        lang === 'hi'
+          ? 'इमेज का साइज़ 10MB से अधिक है। कृपया छोटी इमेज चुनें।'
+          : 'File size exceeds 10MB. Please upload a smaller image file.'
+      );
+      return;
+    }
+
     setImageFile(file);
     setImageMimeType(file.type || 'image/jpeg');
+
     const reader = new FileReader();
     reader.onload = () => {
       setImagePreview(reader.result as string);
     };
+    reader.onerror = () => {
+      setImageError(
+        lang === 'hi'
+          ? 'इमेज लोड करने में त्रुटि हुई। कृपया पुनः प्रयास करें।'
+          : 'Failed to read image file. Please try again.'
+      );
+    };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageSelect = (file: File) => {
+    validateAndSetImage(file);
   };
 
   const handleClearImage = () => {
     setImageFile(null);
     setImagePreview(null);
+    setImageError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      validateAndSetImage(file);
     }
   };
 
@@ -249,7 +304,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp,image/jpg"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -257,21 +312,43 @@ export const MessageInput: React.FC<MessageInputProps> = ({
               }}
             />
 
+            {imageError && (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{imageError}</span>
+              </div>
+            )}
+
             {!imagePreview ? (
-              <button
-                type="button"
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-700 hover:border-amber-500/60 rounded-2xl bg-slate-950/60 transition cursor-pointer text-center group"
+                className={`w-full flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl transition cursor-pointer text-center group ${
+                  isDragging
+                    ? 'border-amber-400 bg-amber-500/15'
+                    : 'border-slate-700 hover:border-amber-500/60 bg-slate-950/60'
+                }`}
               >
                 <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center text-amber-400 mb-3 group-hover:scale-105 transition">
                   <UploadCloud className="w-7 h-7" />
                 </div>
                 <p className="text-base font-bold text-slate-200">{t('screenshot_prompt')}</p>
-                <p className="text-xs text-slate-400 mt-1">{t('screenshot_select')}</p>
-                <span className="mt-4 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold">
-                  PNG, JPG, WebP supported
-                </span>
-              </button>
+                <p className="text-xs text-slate-400 mt-1">
+                  {lang === 'hi'
+                    ? 'इमेज को यहाँ ड्रैग करें या क्लिक करके गैलरी से चुनें'
+                    : 'Drag & drop image here, or click to browse'}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                  <span className="px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-bold">
+                    PNG, JPG, JPEG, WebP
+                  </span>
+                  <span className="px-3 py-1 rounded-xl bg-slate-800 text-slate-300 text-[11px] font-medium border border-slate-700">
+                    Max 10 MB
+                  </span>
+                </div>
+              </div>
             ) : (
               <div className="relative rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 p-2">
                 <img
@@ -287,9 +364,18 @@ export const MessageInput: React.FC<MessageInputProps> = ({
                 >
                   <X className="w-5 h-5" />
                 </button>
-                <div className="p-3 text-xs text-slate-400 flex items-center justify-between">
-                  <span className="font-semibold text-emerald-400">✓ {t('screenshot_selected')}</span>
-                  <span>{imageFile?.name}</span>
+                <div className="p-3 text-xs text-slate-400 flex items-center justify-between border-t border-slate-800 mt-2">
+                  <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                    ✓ {t('screenshot_selected')}
+                  </span>
+                  <div className="flex items-center gap-2 font-mono text-[11px] text-slate-300">
+                    <span className="truncate max-w-[200px]">{imageFile?.name}</span>
+                    {imageFile?.size && (
+                      <span className="text-slate-500">
+                        ({(imageFile.size / 1024).toFixed(0)} KB)
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

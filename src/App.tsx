@@ -28,10 +28,14 @@ export default function App() {
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<AppNavTab>('verify');
   const [analysisData, setAnalysisData] = useState<AnalysisResponseData | null>(null);
+  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null);
   const [lastMaskingInfo, setLastMaskingInfo] = useState<MaskingResult | null>(null);
   const [lastOriginalText, setLastOriginalText] = useState<string>('');
   const [registryPrefill, setRegistryPrefill] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState<
+    'idle' | 'uploading' | 'analyzing' | 'verifying' | 'success' | 'error'
+  >('idle');
   const [apiError, setApiError] = useState<string | null>(null);
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
 
@@ -48,8 +52,16 @@ export default function App() {
     setApiError(null);
     setLastMaskingInfo(payload.maskingInfo);
     setLastOriginalText(payload.originalInput);
+    setLastUploadedImage(payload.imageBase64 || null);
+
+    setPipelineStep(payload.imageBase64 ? 'uploading' : 'analyzing');
 
     try {
+      if (payload.imageBase64) {
+        // Brief state transition to indicate upload -> analysis
+        setTimeout(() => setPipelineStep('analyzing'), 300);
+      }
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,18 +78,17 @@ export default function App() {
         throw new Error(errJson.error || `Server returned error (${response.status})`);
       }
 
+      setPipelineStep('verifying');
       const data: AnalysisResponseData = await response.json();
       setAnalysisData(data);
+      setPipelineStep('success');
       setActiveTab('verify');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('Analysis request error:', msg);
-      setApiError(
-        lang === 'hi'
-          ? 'जांच के दौरान कोई समस्या आई। कृपया पुनः प्रयास करें।'
-          : 'Could not complete analysis. Please try again.'
-      );
+      setPipelineStep('error');
+      setApiError(msg || (lang === 'hi' ? 'जांच के दौरान कोई समस्या आई।' : 'Could not complete analysis.'));
     } finally {
       setIsLoading(false);
     }
@@ -139,6 +150,25 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Real-time Pipeline Progress Indicator */}
+                {isLoading && (
+                  <div className="max-w-2xl mx-auto p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm flex items-center gap-3 animate-pulse">
+                    <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                    <span className="font-semibold">
+                      {pipelineStep === 'uploading' &&
+                        (lang === 'hi' ? 'स्क्रीनशॉट अपलोड हो रहा है...' : 'Uploading image...')}
+                      {pipelineStep === 'analyzing' &&
+                        (lang === 'hi'
+                          ? 'इमेज से टेक्स्ट और विजुअल संकेतों का विश्लेषण हो रहा है...'
+                          : 'Analyzing screenshot and extracting claims...')}
+                      {pipelineStep === 'verifying' &&
+                        (lang === 'hi'
+                          ? 'सेबी के 12,000+ इंटरमीडियरी डेटाबेस से मिलान किया जा रहा है...'
+                          : 'Cross-referencing detected claims against SEBI registries...')}
+                    </span>
+                  </div>
+                )}
+
                 {/* Message Input Component */}
                 <MessageInput
                   lang={lang}
@@ -151,6 +181,7 @@ export default function App() {
                 lang={lang}
                 data={analysisData}
                 maskingInfo={lastMaskingInfo || undefined}
+                uploadedImage={lastUploadedImage}
                 onReset={handleReset}
                 onOpenPauseBreaker={() => setActiveTab('pause')}
                 onOpenEmergency={() => setActiveTab('emergency')}

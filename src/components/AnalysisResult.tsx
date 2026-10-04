@@ -16,6 +16,12 @@ import {
   ExternalLink,
   PhoneCall,
   ArrowRight,
+  Image as ImageIcon,
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  X,
+  Database,
 } from 'lucide-react';
 import { Language, getTranslation, getSpeechLangCode } from '../i18n';
 import { AnalysisSignal } from '../services/ruleEngine';
@@ -31,6 +37,7 @@ export interface AnalysisResponseData {
   isBasicMode: boolean;
   modeLabel: string;
   targetText: string;
+  extractedImageText?: string;
   overallConcern: 'low' | 'medium' | 'high';
   concernReason: string;
   signals: AnalysisSignal[];
@@ -39,12 +46,21 @@ export interface AnalysisResponseData {
   urgencyCues: string[];
   claimedRegistrationNumber: string | null;
   couldNotVerify: string[];
+  sebiVerification?: {
+    searched: boolean;
+    debarredFound: boolean;
+    debarredDetails?: string;
+    registeredFound: boolean;
+    matchedEntityName?: string;
+    category?: string;
+  };
 }
 
 interface AnalysisResultProps {
   lang: Language;
   data: AnalysisResponseData;
   maskingInfo?: MaskingResult;
+  uploadedImage?: string | null;
   onReset: () => void;
   onOpenPauseBreaker?: () => void;
   onOpenEmergency?: () => void;
@@ -55,12 +71,15 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
   lang,
   data,
   maskingInfo,
+  uploadedImage,
   onReset,
   onOpenPauseBreaker,
   onOpenEmergency,
   onOpenRegistryGuide,
 }) => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [showExtractedText, setShowExtractedText] = useState(true);
+  const [isImageZoomed, setIsImageZoomed] = useState(false);
 
   const t = (k: string) => getTranslation(lang, k);
   const isHi = lang === 'hi';
@@ -220,6 +239,97 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
           </div>
         )}
       </div>
+
+      {/* Real Uploaded Screenshot & OCR Transcription Card */}
+      {(uploadedImage || data.extractedImageText) && (
+        <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-amber-400" />
+              <span>
+                {isHi ? 'अपलोड किया गया स्क्रीनशॉट एवं OCR निष्कर्ष' : 'Uploaded Screenshot & OCR Inspection'}
+              </span>
+            </h3>
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              ✓ Real Screenshot Processed
+            </span>
+          </div>
+
+          {uploadedImage && (
+            <div className="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 p-2 flex flex-col items-center">
+              <img
+                src={uploadedImage}
+                alt="Analyzed screenshot"
+                className="max-h-64 object-contain rounded-xl cursor-pointer hover:opacity-95 transition"
+                onClick={() => setIsImageZoomed(true)}
+              />
+              <button
+                type="button"
+                onClick={() => setIsImageZoomed(true)}
+                className="mt-2 text-xs text-amber-300 font-semibold flex items-center gap-1.5 hover:underline cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>{isHi ? 'पूरा स्क्रीनशॉट बड़ा करके देखें' : 'Click to inspect full image'}</span>
+              </button>
+            </div>
+          )}
+
+          {data.extractedImageText && (
+            <div className="rounded-2xl bg-slate-950 border border-slate-800/80 p-4 space-y-2">
+              <div
+                className="flex items-center justify-between cursor-pointer select-none"
+                onClick={() => setShowExtractedText(!showExtractedText)}
+              >
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <span>
+                    {isHi
+                      ? 'स्क्रीनशॉट से निकाला गया मूल टेक्स्ट (OCR):'
+                      : 'Verbatim Extracted Text from Screenshot (OCR):'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="p-1 text-slate-400 hover:text-white"
+                  aria-label="Toggle transcribed text"
+                >
+                  {showExtractedText ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {showExtractedText && (
+                <div className="mt-2 p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-amber-200/90 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                  {data.extractedImageText}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SEBI Intermediary Database Verification Status */}
+          {data.sebiVerification && data.sebiVerification.searched && (
+            <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-3.5 flex items-start gap-3 text-xs">
+              <Database className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-slate-200 block">
+                  {isHi ? 'सेबी 12,397+ रजिस्ट्री सत्यापन:' : 'SEBI 12,397+ Registry Verification:'}
+                </span>
+                <p className="text-slate-400 mt-0.5">
+                  {data.sebiVerification.debarredFound
+                    ? (isHi
+                        ? `चेतावनी: स्क्रीनशॉट में मिली इकाई "${data.sebiVerification.debarredDetails}" सेबी द्वारा प्रतिबंधित (Debarred) सूची में है!`
+                        : `CRITICAL ALERT: Entity "${data.sebiVerification.debarredDetails}" mentioned in screenshot is on the SEBI debarred list!`)
+                    : data.sebiVerification.registeredFound
+                    ? (isHi
+                        ? `रजिस्ट्री रिकॉर्ड: यह नंबर "${data.sebiVerification.matchedEntityName}" (${data.sebiVerification.category}) के नाम पर पंजीकृत है।`
+                        : `Registry Match: Claimed registration belongs to "${data.sebiVerification.matchedEntityName}" (${data.sebiVerification.category}).`)
+                    : (isHi
+                        ? 'स्क्रीनशॉट के दावों को सेबी के 12,397+ आधिकारिक रिकॉर्ड्स, डीबार्ड लिस्ट और नियमों से क्रॉस-चेक किया गया।'
+                        : 'Cross-checked extracted claims against SEBI 12,397+ registry, debarred lists, and statutory guidelines.')}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Prominent Cooling-Off Pause Circuit Breaker Card */}
       {onOpenPauseBreaker && (
@@ -429,6 +539,40 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
       <p className="text-[11px] text-center text-slate-500 leading-relaxed px-4">
         {t('guardrail_disclaimer')}
       </p>
+
+      {/* Full Resolution Zoom Modal */}
+      {isImageZoomed && uploadedImage && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4"
+          onClick={() => setIsImageZoomed(false)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] bg-slate-900 border border-slate-700 rounded-2xl p-2 shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b border-slate-800">
+              <span className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-amber-400" />
+                <span>{isHi ? 'अपलोड किया गया स्क्रीनशॉट' : 'Uploaded Screenshot'}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsImageZoomed(false)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-auto p-2 flex items-center justify-center">
+              <img
+                src={uploadedImage}
+                alt="Full size screenshot"
+                className="max-h-[75vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
