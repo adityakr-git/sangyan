@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -20,23 +21,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+// Support dynamic PORT assigned by hosting providers like Render
+const PORT = Number(process.env.PORT) || 3000;
 
-// Enable JSON body parser with 10MB limit for image uploads
-app.use(express.json({ limit: '10mb' }));
+// Enable JSON body parser with 50MB limit to support high-res screenshots
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Shared Gemini AI Client (Telemetry User-Agent: aistudio-build)
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = apiKey
-  ? new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    })
-  : null;
+// CORS headers to prevent cross-origin issues in production deployments
+app.use((_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (_req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Process error guards to prevent unhandled worker errors from crashing the server
 process.on('unhandledRejection', (reason, promise) => {
@@ -46,28 +47,42 @@ process.on('uncaughtException', (err) => {
   console.warn('[Server Guard] Uncaught Exception:', err.message);
 });
 
-// Valid Gemini models fallback sequence
+// Candidate multimodal Gemini models (stable 2.0-flash and 1.5-flash prioritized for universal key availability)
 const CANDIDATE_GEMINI_MODELS = [
   process.env.GEMINI_MODEL,
-  'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-1.5-flash',
+  'gemini-2.5-flash',
 ].filter(Boolean) as string[];
 
 /**
- * Robust Local OCR Engine using Tesseract.js
- * Runs 100% locally and offline without external API dependencies.
+ * Robust Local OCR Engine using Tesseract.js with 8-second timeout guard.
+ * Runs locally and offline without external network dependencies.
  */
-async function extractTextWithTesseract(imageBuffer: Buffer): Promise<string> {
+async function extractTextWithTesseract(imageBuffer: Buffer, timeoutMs = 8000): Promise<string> {
   try {
-    // Sanity check: Real screenshot files are at least several hundred bytes
     if (!imageBuffer || imageBuffer.length < 256) {
       return '';
     }
-    const result = await Tesseract.recognize(imageBuffer, 'eng');
-    return result?.data?.text?.trim() || '';
+    return await Promise.race([
+      (async () => {
+        try {
+          const result = await Tesseract.recognize(imageBuffer, 'eng');
+          return result?.data?.text?.trim() || '';
+        } catch (err) {
+          console.warn('[IMAGE_ANALYSIS] Tesseract OCR extraction warning:', err instanceof Error ? err.message : err);
+          return '';
+        }
+      })(),
+      new Promise<string>((resolve) =>
+        setTimeout(() => {
+          console.warn(`[IMAGE_ANALYSIS] Tesseract OCR timed out after ${timeoutMs}ms. Continuing pipeline.`);
+          resolve('');
+        }, timeoutMs)
+      ),
+    ]);
   } catch (err) {
-    console.warn('[Tesseract OCR extraction warning]:', err instanceof Error ? err.message : err);
+    console.warn('[IMAGE_ANALYSIS] Tesseract OCR error:', err instanceof Error ? err.message : err);
     return '';
   }
 }
@@ -90,6 +105,19 @@ const LlmAnalysisSchema = z.object({
 });
 
 /**
+ * Health check endpoint for Render monitoring and verification
+ */
+app.get('/healthz', (_req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    geminiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
+    port: PORT,
+    nodeEnv: process.env.NODE_ENV || 'development',
+  });
+});
+
+/**
  * HARD GUARDRAIL 4: Privacy enforcement
  * No messages or user inputs are logged or persisted to disk or database.
  */
@@ -105,21 +133,26 @@ app.post('/api/analyze', async (req, res) => {
     let cleanBase64 = '';
     let imageBuffer: Buffer | null = null;
 
+    // Safe logging: Never log raw image contents or secrets
+    console.log('[IMAGE_ANALYSIS] Request received');
+
     // Step 1: Decode and inspect real image if provided
     if (imageBase64 && typeof imageBase64 === 'string') {
       try {
         cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '').trim();
         if (cleanBase64) {
           imageBuffer = Buffer.from(cleanBase64, 'base64');
-          console.log(`[Image Analysis] Received image: ${imageBuffer.length} bytes, MIME: ${imageMimeType || 'image/jpeg'}`);
-          
+          console.log(`[IMAGE_ANALYSIS] MIME type: ${imageMimeType || 'image/jpeg'}, Image received: true, Size: ${imageBuffer.length} bytes`);
+
           // Execute local Tesseract OCR to extract verbatim text from the screenshot
           extractedImageText = await extractTextWithTesseract(imageBuffer);
-          console.log(`[Image OCR] Extracted ${extractedImageText.length} characters of text from screenshot.`);
+          console.log(`[IMAGE_ANALYSIS] Local OCR extracted ${extractedImageText.length} characters of text.`);
         }
       } catch (imgErr) {
-        console.error('[Image Processing Error]:', imgErr);
+        console.error('[IMAGE_ANALYSIS] Image processing error:', imgErr);
       }
+    } else {
+      console.log('[IMAGE_ANALYSIS] No image payload received; processing text input.');
     }
 
     // Merge extracted OCR text with any companion text
@@ -129,6 +162,21 @@ app.post('/api/analyze', async (req, res) => {
         : extractedImageText;
     }
 
+    // Dynamic Gemini Client check per-request
+    const apiKey = process.env.GEMINI_API_KEY;
+    const ai = apiKey
+      ? new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        })
+      : null;
+
+    console.log(`[IMAGE_ANALYSIS] GEMINI_API_KEY present: ${Boolean(apiKey)}`);
+
     // If neither text nor image was provided
     if (!targetText && !imageBuffer) {
       return res.status(400).json({
@@ -136,8 +184,8 @@ app.post('/api/analyze', async (req, res) => {
       });
     }
 
-    // If an image was uploaded but contains no legible text and no companion note was provided
-    if (!targetText && imageBuffer) {
+    // If an image was uploaded, but has no legible text, and no Gemini API is available
+    if (!targetText && imageBuffer && !ai) {
       return res.json({
         isBasicMode: true,
         modeLabel: 'Basic Mode (Offline Image Inspection)',
@@ -247,6 +295,7 @@ app.post('/api/analyze', async (req, res) => {
     // Step 3: Multimodal LLM Step (if Gemini API key is configured)
     if (!ai) {
       // Basic Mode Fallback: No API key configured
+      console.log('[IMAGE_ANALYSIS] Completing in Basic Mode (Offline OCR & Rule Engine).');
       return res.json({
         isBasicMode: true,
         modeLabel: 'Basic Mode (Offline OCR & Rule-Engine)',
@@ -283,7 +332,8 @@ CRITICAL HARD GUARDRAILS (Strictly Mandatory):
 4. Output in ${langLabel}. Keep explanations plain, simple, and jargon-free for a senior citizen or first-time investor.
 5. Extract EXACT verbatim quotes from the content for every signal.`;
 
-    const userPromptText = `Analyze this user-submitted financial screenshot and text for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
+    const userPromptText = targetText
+      ? `Analyze this user-submitted financial screenshot and text for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
 
 Examine both textual claims and visual signals (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI).
 
@@ -291,6 +341,11 @@ Content:
 """
 ${targetText}
 """
+
+Return a JSON object conforming strictly to the requested schema.`
+      : `Analyze this user-submitted financial screenshot for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
+
+Read all text visible in the screenshot, inspect visual elements (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI), and cross-check the claims.
 
 Return a JSON object conforming strictly to the requested schema.`;
 
@@ -312,9 +367,12 @@ Return a JSON object conforming strictly to the requested schema.`;
     let liveLlmResult: z.infer<typeof LlmAnalysisSchema> | null = null;
     let successfulModel = '';
 
+    console.log('[IMAGE_ANALYSIS] Gemini request started');
+
     // Attempt Gemini call across candidate models
     for (const modelCandidate of CANDIDATE_GEMINI_MODELS) {
       try {
+        console.log(`[IMAGE_ANALYSIS] Attempting model: ${modelCandidate}`);
         const response = await ai.models.generateContent({
           model: modelCandidate,
           contents: contentParts,
@@ -342,6 +400,7 @@ Return a JSON object conforming strictly to the requested schema.`;
                 claimedRegistrationNumber: {
                   type: Type.STRING,
                   description: 'Claimed SEBI registration number if mentioned, or null.',
+                  nullable: true,
                 },
                 signals: {
                   type: Type.ARRAY,
@@ -376,18 +435,22 @@ Return a JSON object conforming strictly to the requested schema.`;
           },
         });
 
-        const responseText = response.text?.trim() || '{}';
-        const parsedJson = JSON.parse(responseText);
+        const rawText = response.text?.trim() || '{}';
+        // Strip any unexpected markdown code fence wrap
+        const cleanJson = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+        const parsedJson = JSON.parse(cleanJson);
         liveLlmResult = LlmAnalysisSchema.parse(parsedJson);
         successfulModel = modelCandidate;
+        console.log(`[IMAGE_ANALYSIS] Gemini response status: SUCCESS with model ${modelCandidate}`);
         break; // Successfully generated content
       } catch (err) {
-        console.warn(`[Gemini Model ${modelCandidate} failed]:`, err);
+        console.warn(`[IMAGE_ANALYSIS] Gemini Model ${modelCandidate} failed:`, err instanceof Error ? err.message : err);
       }
     }
 
     if (!liveLlmResult) {
       // Fallback gracefully to Rule Engine + OCR output
+      console.log('[IMAGE_ANALYSIS] Gemini request unsuccessful across models. Falling back to Rule Engine & OCR.');
       return res.json({
         isBasicMode: true,
         modeLabel: 'Basic Mode (Offline OCR & Rule-Engine Active)',
@@ -487,8 +550,8 @@ Return a JSON object conforming strictly to the requested schema.`;
     });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('Server error handling /api/analyze:', errorMsg);
-    res.status(500).json({ error: 'Failed to complete analysis. Please try again.' });
+    console.error('[IMAGE_ANALYSIS] Server error handling /api/analyze:', errorMsg);
+    res.status(500).json({ error: `Failed to complete analysis: ${errorMsg}` });
   }
 });
 
@@ -547,7 +610,11 @@ app.get('/api/sebi/prefixes', (_req, res) => {
 
 // Setup Vite or static serving
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.resolve(__dirname, 'dist');
+  const hasDist = fs.existsSync(path.resolve(distPath, 'index.html'));
+  const isProduction = process.env.NODE_ENV === 'production' || hasDist;
+
+  if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
@@ -560,18 +627,18 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Sangyan server running on http://0.0.0.0:${PORT}`);
+    console.log(`[SERVER_START] Sangyan server running on http://0.0.0.0:${PORT} (Production: ${isProduction})`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start server:', err);
+  console.error('[SERVER_START] Failed to start server:', err);
   process.exit(1);
 });

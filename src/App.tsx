@@ -75,7 +75,9 @@ export default function App() {
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || `Server returned error (${response.status})`);
+        const errorDetail = errJson.error || `Server returned HTTP ${response.status}`;
+        console.error(`[IMAGE_ANALYSIS] Analysis request failed: status = ${response.status}, error = ${errorDetail}`);
+        throw new Error(errorDetail);
       }
 
       setPipelineStep('verifying');
@@ -86,9 +88,13 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('Analysis request error:', msg);
+      console.error(`[IMAGE_ANALYSIS] Image analysis failed: ${msg}`);
       setPipelineStep('error');
-      setApiError(msg || (lang === 'hi' ? 'जांच के दौरान कोई समस्या आई।' : 'Could not complete analysis.'));
+      setApiError(
+        lang === 'hi'
+          ? `जांच में समस्या आई (${msg})`
+          : `Analysis error: ${msg}`
+      );
     } finally {
       setIsLoading(false);
     }
