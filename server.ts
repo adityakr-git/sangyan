@@ -65,6 +65,8 @@ app.get(['/healthz', '/api/healthz'], (_req, res) => {
  * Uses shared analysis engine shared across Express (Render/Localhost) and Serverless (Vercel).
  */
 app.post('/api/analyze', async (req, res) => {
+  console.log('[EXPRESS_API] request received at /api/analyze');
+  console.log(`[EXPRESS_API] GEMINI_API_KEY configured: ${Boolean(process.env.GEMINI_API_KEY)}`);
   try {
     const result = await executeImageAnalysis(req.body);
     res.json(result);

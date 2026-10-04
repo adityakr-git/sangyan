@@ -41,7 +41,8 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    console.log('[VERCEL_API] Executing /api/analyze request');
+    console.log('[VERCEL_API] request received at /api/analyze');
+    console.log(`[VERCEL_API] GEMINI_API_KEY configured: ${Boolean(process.env.GEMINI_API_KEY)}`);
     const result = await executeImageAnalysis(payload);
     return res.status(200).json(result);
   } catch (err: unknown) {

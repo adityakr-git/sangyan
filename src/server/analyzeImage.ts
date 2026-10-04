@@ -164,12 +164,33 @@ export async function executeImageAnalysis(
 
   const apiKey = explicitApiKey || process.env.GEMINI_API_KEY;
   const hasGeminiKey = Boolean(apiKey && apiKey.trim().length > 0);
-  console.log(`[IMAGE_ANALYSIS] GEMINI_API_KEY exists: ${hasGeminiKey}`);
+  console.log('[IMAGE_ANALYSIS] request received at /api/analyze');
+  console.log(`[IMAGE_ANALYSIS] GEMINI_API_KEY configured: ${hasGeminiKey}`);
 
   if (!targetText && !hasImage) {
     const err = new Error('Please provide either a message text or upload an image screenshot.');
     (err as any).status = 400;
     throw err;
+  }
+
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    Boolean(process.env.VERCEL) ||
+    Boolean(process.env.RENDER);
+
+  if (!hasGeminiKey) {
+    console.error(
+      '[IMAGE_ANALYSIS] CRITICAL CONFIGURATION ERROR: GEMINI_API_KEY is missing in production environment. Gemini AI analysis cannot proceed without a valid GEMINI_API_KEY.'
+    );
+    if (isProduction && process.env.ALLOW_OFFLINE_FALLBACK !== 'true') {
+      const err = new Error(
+        'GEMINI_API_KEY is not configured in the production environment. Please configure GEMINI_API_KEY in your hosting Environment Variables (e.g. Vercel Project Settings > Environment Variables).'
+      );
+      (err as any).status = 500;
+      throw err;
+    } else {
+      console.warn('[IMAGE_ANALYSIS] Falling back to offline OCR & Rule Engine (ALLOW_OFFLINE_FALLBACK is enabled or development mode).');
+    }
   }
 
   let extractedImageText = '';
@@ -238,6 +259,7 @@ Return a JSON object conforming strictly to the requested schema.`;
       text: userPromptText,
     });
 
+    let lastGeminiError: unknown = null;
     console.log('[IMAGE_ANALYSIS] Gemini request started');
 
     for (const modelCandidate of CANDIDATE_GEMINI_MODELS) {
@@ -314,15 +336,29 @@ Return a JSON object conforming strictly to the requested schema.`;
         const parsedJson = JSON.parse(cleanJson);
         liveLlmResult = LlmAnalysisSchema.parse(parsedJson);
         successfulModel = modelCandidate;
-        console.log(`[IMAGE_ANALYSIS] Gemini response status: SUCCESS with model ${modelCandidate}`);
+        console.log(`[IMAGE_ANALYSIS] Gemini response received from model: ${modelCandidate}`);
         break;
       } catch (geminiErr) {
+        lastGeminiError = geminiErr;
         const errDetail = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
         console.warn(`[IMAGE_ANALYSIS] Gemini Model ${modelCandidate} failed: ${errDetail}`);
       }
     }
-  } else {
-    console.log('[IMAGE_ANALYSIS] GEMINI_API_KEY is not configured. Falling back to offline OCR & Rule Engine.');
+
+    if (hasGeminiKey && !liveLlmResult) {
+      const lastErrDetail =
+        lastGeminiError instanceof Error ? lastGeminiError.message : String(lastGeminiError || 'All models failed');
+      console.error(
+        `[IMAGE_ANALYSIS] CRITICAL ERROR: Gemini AI analysis failed across all candidate models (${CANDIDATE_GEMINI_MODELS.join(', ')}): ${lastErrDetail}`
+      );
+      if (isProduction && process.env.ALLOW_OFFLINE_FALLBACK !== 'true') {
+        const err = new Error(`Gemini AI analysis failed: ${lastErrDetail}`);
+        (err as any).status = 500;
+        throw err;
+      } else {
+        console.warn('[IMAGE_ANALYSIS] Falling back to offline OCR & Rule Engine after Gemini failure.');
+      }
+    }
   }
 
   // Step 2: Offline OCR Fallback (if Gemini was not available or failed)
