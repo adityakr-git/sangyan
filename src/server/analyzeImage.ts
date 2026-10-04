@@ -3,8 +3,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
 import { z } from 'zod';
-import { analyzeWithRuleEngine, AnalysisSignal } from '../services/ruleEngine';
-import { searchSebi } from '../services/sebiSearchService';
+import { analyzeWithRuleEngine, AnalysisSignal } from '../services/ruleEngine.js';
+import { searchSebi } from '../services/sebiSearchService.js';
 
 const getDirname = () => {
   if (typeof __dirname !== 'undefined' && __dirname) return __dirname;

@@ -1,4 +1,4 @@
-import { getPrefixesList } from '../../src/services/sebiSearchService';
+import { getPrefixesList } from '../../src/services/sebiSearchService.js';
 
 export default function handler(_req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

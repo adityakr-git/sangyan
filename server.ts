@@ -49,7 +49,7 @@ process.on('uncaughtException', (err) => {
 /**
  * Health check endpoint for Render monitoring and verification
  */
-app.get('/healthz', (_req, res) => {
+app.get(['/healthz', '/api/healthz'], (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),

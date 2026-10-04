@@ -1,4 +1,4 @@
-import { executeImageAnalysis } from '../src/server/analyzeImage';
+import { executeImageAnalysis } from '../src/server/analyzeImage.js';
 
 export default async function handler(req: any, res: any) {
   // Production CORS headers
