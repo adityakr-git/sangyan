@@ -62,7 +62,12 @@ export default function App() {
         setTimeout(() => setPipelineStep('analyzing'), 300);
       }
 
-      const response = await fetch('/api/analyze', {
+      const apiEndpoint =
+        ((import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '') + '/api/analyze';
+
+      console.log(`[IMAGE_ANALYSIS] Dispatching analysis request to: ${apiEndpoint}`);
+
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

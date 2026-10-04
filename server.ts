@@ -56,18 +56,23 @@ const CANDIDATE_GEMINI_MODELS = [
 ].filter(Boolean) as string[];
 
 /**
- * Robust Local OCR Engine using Tesseract.js with 8-second timeout guard.
- * Runs locally and offline without external network dependencies.
+ * Robust Local OCR Engine using Tesseract.js with local traineddata and 6-second timeout guard.
+ * Bundled eng.traineddata ensures zero external network dependencies in production.
  */
-async function extractTextWithTesseract(imageBuffer: Buffer, timeoutMs = 8000): Promise<string> {
+async function extractTextWithTesseract(imageBuffer: Buffer, timeoutMs = 6000): Promise<string> {
   try {
     if (!imageBuffer || imageBuffer.length < 256) {
       return '';
     }
+    const trainedDataPath = path.resolve(__dirname, 'eng.traineddata');
+    const langOptions: Record<string, unknown> = fs.existsSync(trainedDataPath)
+      ? { langPath: __dirname }
+      : {};
+
     return await Promise.race([
       (async () => {
         try {
-          const result = await Tesseract.recognize(imageBuffer, 'eng');
+          const result = await Tesseract.recognize(imageBuffer, 'eng', langOptions);
           return result?.data?.text?.trim() || '';
         } catch (err) {
           console.warn('[IMAGE_ANALYSIS] Tesseract OCR extraction warning:', err instanceof Error ? err.message : err);
@@ -122,70 +127,219 @@ app.get('/healthz', (_req, res) => {
  * No messages or user inputs are logged or persisted to disk or database.
  */
 app.post('/api/analyze', async (req, res) => {
+  const reqStart = Date.now();
+  console.log('[IMAGE_ANALYSIS] Request arrived at /api/analyze');
+
   try {
-    const { text, imageBase64, imageMimeType, language = 'en' } = req.body;
+    const { text, imageBase64, imageMimeType, language = 'en' } = req.body || {};
 
     let targetText = typeof text === 'string' ? text.trim() : '';
     const selectedLang: 'en' | 'hi' | 'mr' | 'gu' =
       language === 'hi' ? 'hi' : language === 'mr' ? 'mr' : language === 'gu' ? 'gu' : 'en';
 
-    let extractedImageText = '';
     let cleanBase64 = '';
     let imageBuffer: Buffer | null = null;
+    let normalizedMime = 'image/jpeg';
+    const hasImage = Boolean(imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50);
 
-    // Safe logging: Never log raw image contents or secrets
-    console.log('[IMAGE_ANALYSIS] Request received');
+    console.log(`[IMAGE_ANALYSIS] Image exists: ${hasImage}`);
 
-    // Step 1: Decode and inspect real image if provided
-    if (imageBase64 && typeof imageBase64 === 'string') {
-      try {
-        cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '').trim();
-        if (cleanBase64) {
-          imageBuffer = Buffer.from(cleanBase64, 'base64');
-          console.log(`[IMAGE_ANALYSIS] MIME type: ${imageMimeType || 'image/jpeg'}, Image received: true, Size: ${imageBuffer.length} bytes`);
-
-          // Execute local Tesseract OCR to extract verbatim text from the screenshot
-          extractedImageText = await extractTextWithTesseract(imageBuffer);
-          console.log(`[IMAGE_ANALYSIS] Local OCR extracted ${extractedImageText.length} characters of text.`);
-        }
-      } catch (imgErr) {
-        console.error('[IMAGE_ANALYSIS] Image processing error:', imgErr);
+    if (hasImage) {
+      const rawMime = (imageMimeType || 'image/jpeg').trim().toLowerCase();
+      if (rawMime.includes('png')) {
+        normalizedMime = 'image/png';
+      } else if (rawMime.includes('webp')) {
+        normalizedMime = 'image/webp';
+      } else {
+        normalizedMime = 'image/jpeg';
       }
-    } else {
-      console.log('[IMAGE_ANALYSIS] No image payload received; processing text input.');
+
+      cleanBase64 = (imageBase64 as string).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+      imageBuffer = Buffer.from(cleanBase64, 'base64');
+
+      console.log(`[IMAGE_ANALYSIS] Image MIME type: ${normalizedMime}`);
+      console.log(`[IMAGE_ANALYSIS] Image base64 length: ${cleanBase64.length} chars (decoded: ${imageBuffer.length} bytes)`);
     }
 
-    // Merge extracted OCR text with any companion text
-    if (extractedImageText) {
-      targetText = targetText
-        ? `${targetText}\n\n[From Screenshot]:\n${extractedImageText}`
-        : extractedImageText;
-    }
-
-    // Dynamic Gemini Client check per-request
     const apiKey = process.env.GEMINI_API_KEY;
-    const ai = apiKey
-      ? new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        })
-      : null;
+    const hasGeminiKey = Boolean(apiKey && apiKey.trim().length > 0);
+    console.log(`[IMAGE_ANALYSIS] GEMINI_API_KEY exists: ${hasGeminiKey}`);
 
-    console.log(`[IMAGE_ANALYSIS] GEMINI_API_KEY present: ${Boolean(apiKey)}`);
-
-    // If neither text nor image was provided
-    if (!targetText && !imageBuffer) {
+    if (!targetText && !hasImage) {
+      console.log('[IMAGE_ANALYSIS] HTTP Response: 400 Bad Request');
       return res.status(400).json({
         error: 'Please provide either a message text or upload an image screenshot.',
       });
     }
 
-    // If an image was uploaded, but has no legible text, and no Gemini API is available
-    if (!targetText && imageBuffer && !ai) {
+    let extractedImageText = '';
+    let liveLlmResult: z.infer<typeof LlmAnalysisSchema> | null = null;
+    let successfulModel = '';
+
+    const langLabel =
+      selectedLang === 'hi'
+        ? 'Hindi (हिंदी)'
+        : selectedLang === 'mr'
+        ? 'Marathi (मराठी)'
+        : selectedLang === 'gu'
+        ? 'Gujarati (ગુજરાતી)'
+        : 'English';
+
+    // Step 1: Multimodal Gemini Vision AI (if GEMINI_API_KEY is configured)
+    // Runs directly on image base64 without blocking on local OCR overhead
+    if (hasGeminiKey) {
+      console.log('[IMAGE_ANALYSIS] Initializing Gemini Multimodal Vision AI...');
+      const ai = new GoogleGenAI({
+        apiKey: apiKey!,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const systemPrompt = `You are "SANGYAN", an objective, calm pause-and-verify assistant for first-time Indian retail investors in Tier-2/3 cities.
+
+CRITICAL HARD GUARDRAILS (Strictly Mandatory):
+1. NEVER produce stock tips, buy/sell/hold ratings, price predictions, or recommend any specific financial instrument, broker, or platform.
+2. Judge ONLY the MESSAGE, CLAIMS, TACTICS, or VISUAL ARTIFACTS in the content, never whether an instrument or company is inherently good or bad.
+3. NEVER output a binary "scam" or "safe" verdict. Provide graded concern (low, medium, high) and always highlight unverified claims.
+4. Output in ${langLabel}. Keep explanations plain, simple, and jargon-free for a senior citizen or first-time investor.
+5. Extract EXACT verbatim quotes from the content for every signal.`;
+
+      const userPromptText = targetText
+        ? `Analyze this user-submitted financial screenshot and text for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
+
+Examine both textual claims and visual signals (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI).
+
+Content:
+"""
+${targetText}
+"""
+
+Return a JSON object conforming strictly to the requested schema.`
+        : `Analyze this user-submitted financial screenshot for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
+
+Read all text visible in the screenshot, inspect visual elements (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI), and cross-check the claims.
+
+Return a JSON object conforming strictly to the requested schema.`;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const contentParts: any[] = [];
+      if (hasImage && cleanBase64) {
+        contentParts.push({
+          inlineData: {
+            mimeType: normalizedMime,
+            data: cleanBase64,
+          },
+        });
+      }
+      contentParts.push({
+        text: userPromptText,
+      });
+
+      console.log('[IMAGE_ANALYSIS] Gemini request started');
+
+      for (const modelCandidate of CANDIDATE_GEMINI_MODELS) {
+        try {
+          console.log(`[IMAGE_ANALYSIS] Attempting model: ${modelCandidate}`);
+          const response = await ai.models.generateContent({
+            model: modelCandidate,
+            contents: contentParts,
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  extractedClaims: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Key promises or claims extracted from the image or text.',
+                  },
+                  promisedReturns: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Specific return promises or percentages claimed.',
+                  },
+                  urgencyCues: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Artificial urgency phrases or countdown language.',
+                  },
+                  claimedRegistrationNumber: {
+                    type: Type.STRING,
+                    description: 'Claimed SEBI registration number if mentioned, or null.',
+                    nullable: true,
+                  },
+                  signals: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        severity: {
+                          type: Type.STRING,
+                          description: 'Severity level: low, medium, or high',
+                        },
+                        quote: {
+                          type: Type.STRING,
+                          description: 'Exact verbatim quote from the message or image text',
+                        },
+                        explanation: {
+                          type: Type.STRING,
+                          description: 'One plain-language sentence explaining why this is a warning signal under SEBI guidelines.',
+                        },
+                      },
+                      required: ['id', 'severity', 'quote', 'explanation'],
+                    },
+                  },
+                  couldNotVerify: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Things that cannot be verified from a message alone (e.g. sender identity, past profits, SEBI directory check).',
+                  },
+                },
+                required: ['signals', 'couldNotVerify'],
+              },
+            },
+          });
+
+          const rawText =
+            response.text?.trim() ||
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (response as any).candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+            '{}';
+          const cleanJson = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+          const parsedJson = JSON.parse(cleanJson);
+          liveLlmResult = LlmAnalysisSchema.parse(parsedJson);
+          successfulModel = modelCandidate;
+          console.log(`[IMAGE_ANALYSIS] Gemini response status: SUCCESS with model ${modelCandidate}`);
+          break;
+        } catch (geminiErr) {
+          const errDetail = geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+          console.warn(`[IMAGE_ANALYSIS] Gemini Model ${modelCandidate} failed: ${errDetail}`);
+        }
+      }
+    } else {
+      console.log('[IMAGE_ANALYSIS] GEMINI_API_KEY is not configured. Falling back to offline OCR & Rule Engine.');
+    }
+
+    // Step 2: Offline OCR Fallback (if Gemini was not available or failed)
+    if (!liveLlmResult && hasImage && imageBuffer) {
+      console.log('[IMAGE_ANALYSIS] Running offline Tesseract OCR fallback...');
+      extractedImageText = await extractTextWithTesseract(imageBuffer);
+      console.log(`[IMAGE_ANALYSIS] Local OCR extracted ${extractedImageText.length} characters of text.`);
+      if (extractedImageText) {
+        targetText = targetText
+          ? `${targetText}\n\n[From Screenshot]:\n${extractedImageText}`
+          : extractedImageText;
+      }
+    }
+
+    // If an image was uploaded, but has no legible text, and no Gemini API response
+    if (!targetText && hasImage && !liveLlmResult) {
+      console.log(`[IMAGE_ANALYSIS] HTTP Response: 200 OK (Basic Mode - No text detected in ${Date.now() - reqStart}ms)`);
       return res.json({
         isBasicMode: true,
         modeLabel: 'Basic Mode (Offline Image Inspection)',
@@ -213,12 +367,14 @@ app.post('/api/analyze', async (req, res) => {
         },
       });
     }
+    // Step 3: Run deterministic rule engine
+    // Build combined text for rule check (either companion text + OCR or text extracted by LLM)
+    const textForRuleEngine = targetText || (liveLlmResult?.extractedClaims || []).join(' ');
+    const ruleResult = analyzeWithRuleEngine(textForRuleEngine, selectedLang);
 
-    // Step 2: Run deterministic rule engine
-    const ruleResult = analyzeWithRuleEngine(targetText, selectedLang);
-
-    // Step 2b: Cross-check against SEBI database for debarred entities and claimed registration numbers
-    const sebiDebarredCheck = searchSebi({ query: targetText });
+    // Cross-check against SEBI database for debarred entities and claimed registration numbers
+    const checkQuery = targetText || (liveLlmResult?.extractedClaims || []).join(' ');
+    const sebiDebarredCheck = searchSebi({ query: checkQuery });
     let debarredFound = false;
     let debarredDetails: string | undefined = undefined;
 
@@ -251,8 +407,10 @@ app.post('/api/analyze', async (req, res) => {
     let matchedEntityName: string | undefined = undefined;
     let matchedCategory: string | undefined = undefined;
 
-    if (ruleResult.claimedRegistrationNumber) {
-      const regCheck = searchSebi({ query: ruleResult.claimedRegistrationNumber, limit: 5 });
+    // Check either rule-detected reg number or LLM-detected reg number
+    const regNumberToCheck = ruleResult.claimedRegistrationNumber || liveLlmResult?.claimedRegistrationNumber;
+    if (regNumberToCheck) {
+      const regCheck = searchSebi({ query: regNumberToCheck, limit: 5 });
       if (regCheck.entities.length > 0) {
         registeredFound = true;
         const matched = regCheck.entities[0];
@@ -262,7 +420,7 @@ app.post('/api/analyze', async (req, res) => {
           id: 'SEBI_REG_MATCH_CHECK',
           category: 'sebi_format',
           severity: 'medium',
-          quote: ruleResult.claimedRegistrationNumber,
+          quote: regNumberToCheck,
           explanation:
             selectedLang === 'hi'
               ? `सेबी डेटाबेस मिलान: यह नंबर सेबी रिकॉर्ड में "${matched.name}" (${matched.categoryHi}) के नाम पर दर्ज है। पुष्टि करें कि मैसेज भेजने वाले का ईमेल @${matched.registeredEmailDomain || 'आधिकारिक डोमेन'} है और भुगतान व्यक्तिगत UPI पर नहीं मांगा गया।`
@@ -273,11 +431,11 @@ app.post('/api/analyze', async (req, res) => {
           id: 'SEBI_REG_NOT_FOUND',
           category: 'sebi_format',
           severity: 'high',
-          quote: ruleResult.claimedRegistrationNumber,
+          quote: regNumberToCheck,
           explanation:
             selectedLang === 'hi'
-              ? `सेबी डेटाबेस अलर्ट: दावा किया गया रजिस्ट्रेशन नंबर "${ruleResult.claimedRegistrationNumber}" सेबी के आधिकारिक 12,000+ इंटरमीडियरी डेटाबेस में नहीं मिला। यह फर्जी नंबर होने की प्रबल संभावना है!`
-              : `SEBI Registry Alert: The claimed registration number "${ruleResult.claimedRegistrationNumber}" was NOT found in SEBI's official database of 12,000+ registered entities. High probability of a fabricated registration number!`,
+              ? `सेबी डेटाबेस अलर्ट: दावा किया गया रजिस्ट्रेशन नंबर "${regNumberToCheck}" सेबी के आधिकारिक 12,000+ इंटरमीडियरी डेटाबेस में नहीं मिला। यह फर्जी नंबर होने की प्रबल संभावना है!`
+              : `SEBI Registry Alert: The claimed registration number "${regNumberToCheck}" was NOT found in SEBI's official database of 12,000+ registered entities. High probability of a fabricated registration number!`,
         });
         ruleResult.overallConcern = 'high';
       }
@@ -292,165 +450,9 @@ app.post('/api/analyze', async (req, res) => {
       category: matchedCategory,
     };
 
-    // Step 3: Multimodal LLM Step (if Gemini API key is configured)
-    if (!ai) {
-      // Basic Mode Fallback: No API key configured
-      console.log('[IMAGE_ANALYSIS] Completing in Basic Mode (Offline OCR & Rule Engine).');
-      return res.json({
-        isBasicMode: true,
-        modeLabel: 'Basic Mode (Offline OCR & Rule-Engine)',
-        targetText,
-        extractedImageText,
-        overallConcern: ruleResult.overallConcern,
-        concernReason: ruleResult.concernReason,
-        signals: ruleResult.signals,
-        extractedClaims: ruleResult.extractedClaims,
-        promisedReturns: ruleResult.promisedReturns,
-        urgencyCues: ruleResult.urgencyCues,
-        claimedRegistrationNumber: ruleResult.claimedRegistrationNumber,
-        couldNotVerify: ruleResult.couldNotVerify,
-        sebiVerification: sebiVerificationPayload,
-      });
-    }
-
-    const langLabel =
-      selectedLang === 'hi'
-        ? 'Hindi (हिंदी)'
-        : selectedLang === 'mr'
-        ? 'Marathi (मराठी)'
-        : selectedLang === 'gu'
-        ? 'Gujarati (ગુજરાતી)'
-        : 'English';
-
-    // Call Gemini with strict system instructions and structured JSON response
-    const systemPrompt = `You are "SANGYAN", an objective, calm pause-and-verify assistant for first-time Indian retail investors in Tier-2/3 cities.
-
-CRITICAL HARD GUARDRAILS (Strictly Mandatory):
-1. NEVER produce stock tips, buy/sell/hold ratings, price predictions, or recommend any specific financial instrument, broker, or platform.
-2. Judge ONLY the MESSAGE, CLAIMS, TACTICS, or VISUAL ARTIFACTS in the content, never whether an instrument or company is inherently good or bad.
-3. NEVER output a binary "scam" or "safe" verdict. Provide graded concern (low, medium, high) and always highlight unverified claims.
-4. Output in ${langLabel}. Keep explanations plain, simple, and jargon-free for a senior citizen or first-time investor.
-5. Extract EXACT verbatim quotes from the content for every signal.`;
-
-    const userPromptText = targetText
-      ? `Analyze this user-submitted financial screenshot and text for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
-
-Examine both textual claims and visual signals (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI).
-
-Content:
-"""
-${targetText}
-"""
-
-Return a JSON object conforming strictly to the requested schema.`
-      : `Analyze this user-submitted financial screenshot for deceptive tactics, SEBI regulation compliance, guaranteed returns, artificial urgency, private group invites, or unauthorized software/payment requests.
-
-Read all text visible in the screenshot, inspect visual elements (such as fake SEBI seals, badges, charts, contact handles, UPI IDs, trading UI), and cross-check the claims.
-
-Return a JSON object conforming strictly to the requested schema.`;
-
-    // Construct multimodal content parts if image is present
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const contentParts: any[] = [];
-    if (cleanBase64) {
-      contentParts.push({
-        inlineData: {
-          mimeType: imageMimeType || 'image/jpeg',
-          data: cleanBase64,
-        },
-      });
-    }
-    contentParts.push({
-      text: userPromptText,
-    });
-
-    let liveLlmResult: z.infer<typeof LlmAnalysisSchema> | null = null;
-    let successfulModel = '';
-
-    console.log('[IMAGE_ANALYSIS] Gemini request started');
-
-    // Attempt Gemini call across candidate models
-    for (const modelCandidate of CANDIDATE_GEMINI_MODELS) {
-      try {
-        console.log(`[IMAGE_ANALYSIS] Attempting model: ${modelCandidate}`);
-        const response = await ai.models.generateContent({
-          model: modelCandidate,
-          contents: contentParts,
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                extractedClaims: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Key promises or claims extracted from the image or text.',
-                },
-                promisedReturns: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Specific return promises or percentages claimed.',
-                },
-                urgencyCues: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Artificial urgency phrases or countdown language.',
-                },
-                claimedRegistrationNumber: {
-                  type: Type.STRING,
-                  description: 'Claimed SEBI registration number if mentioned, or null.',
-                  nullable: true,
-                },
-                signals: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      severity: {
-                        type: Type.STRING,
-                        description: 'Severity level: low, medium, or high',
-                      },
-                      quote: {
-                        type: Type.STRING,
-                        description: 'Exact verbatim quote from the message or image text',
-                      },
-                      explanation: {
-                        type: Type.STRING,
-                        description: 'One plain-language sentence explaining why this is a warning signal under SEBI guidelines.',
-                      },
-                    },
-                    required: ['id', 'severity', 'quote', 'explanation'],
-                  },
-                },
-                couldNotVerify: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Things that cannot be verified from a message alone (e.g. sender identity, past profits, SEBI directory check).',
-                },
-              },
-              required: ['signals', 'couldNotVerify'],
-            },
-          },
-        });
-
-        const rawText = response.text?.trim() || '{}';
-        // Strip any unexpected markdown code fence wrap
-        const cleanJson = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-        const parsedJson = JSON.parse(cleanJson);
-        liveLlmResult = LlmAnalysisSchema.parse(parsedJson);
-        successfulModel = modelCandidate;
-        console.log(`[IMAGE_ANALYSIS] Gemini response status: SUCCESS with model ${modelCandidate}`);
-        break; // Successfully generated content
-      } catch (err) {
-        console.warn(`[IMAGE_ANALYSIS] Gemini Model ${modelCandidate} failed:`, err instanceof Error ? err.message : err);
-      }
-    }
-
+    // If Gemini was not used or failed, return the rule engine & OCR result
     if (!liveLlmResult) {
-      // Fallback gracefully to Rule Engine + OCR output
-      console.log('[IMAGE_ANALYSIS] Gemini request unsuccessful across models. Falling back to Rule Engine & OCR.');
+      console.log(`[IMAGE_ANALYSIS] HTTP Response: 200 OK (Basic Mode - Rule Engine in ${Date.now() - reqStart}ms)`);
       return res.json({
         isBasicMode: true,
         modeLabel: 'Basic Mode (Offline OCR & Rule-Engine Active)',
@@ -468,11 +470,10 @@ Return a JSON object conforming strictly to the requested schema.`;
       });
     }
 
-    // Step 4: Merge and de-duplicate signals from LLM and Rule Engine
+    // Merge and de-duplicate signals from LLM and Rule Engine
     const mergedSignals: AnalysisSignal[] = [];
     const seenQuotes = new Set<string>();
 
-    // Rule engine signals are authoritative on SEBI formats and key words
     for (const sig of ruleResult.signals) {
       const normalizedQuote = sig.quote.toLowerCase().trim();
       if (!seenQuotes.has(normalizedQuote)) {
@@ -481,7 +482,6 @@ Return a JSON object conforming strictly to the requested schema.`;
       }
     }
 
-    // Add LLM signals if distinct
     for (const sig of liveLlmResult.signals) {
       const normalizedQuote = sig.quote.toLowerCase().trim();
       const isDuplicate = Array.from(seenQuotes).some(
@@ -500,12 +500,10 @@ Return a JSON object conforming strictly to the requested schema.`;
       }
     }
 
-    // Merge "Could Not Verify" items
     const mergedCouldNotVerify = Array.from(
       new Set([...ruleResult.couldNotVerify, ...(liveLlmResult.couldNotVerify || [])])
     );
 
-    // Compute combined concern level
     const hasHigh = mergedSignals.some((s) => s.severity === 'high');
     const hasMedium = mergedSignals.some((s) => s.severity === 'medium');
 
@@ -526,6 +524,7 @@ Return a JSON object conforming strictly to the requested schema.`;
           : 'This screenshot/message displays moderate concern cues such as urgency, private groups, or unverified claims.';
     }
 
+    console.log(`[IMAGE_ANALYSIS] HTTP Response: 200 OK (Multimodal AI in ${Date.now() - reqStart}ms)`);
     return res.json({
       isBasicMode: false,
       modeLabel: `Live Vision AI Analysis (${successfulModel})`,
@@ -544,13 +543,14 @@ Return a JSON object conforming strictly to the requested schema.`;
         new Set([...ruleResult.urgencyCues, ...(liveLlmResult.urgencyCues || [])])
       ),
       claimedRegistrationNumber:
-        ruleResult.claimedRegistrationNumber || liveLlmResult.claimedRegistrationNumber,
+        regNumberToCheck || ruleResult.claimedRegistrationNumber || liveLlmResult.claimedRegistrationNumber,
       couldNotVerify: mergedCouldNotVerify,
       sebiVerification: sebiVerificationPayload,
     });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[IMAGE_ANALYSIS] Server error handling /api/analyze:', errorMsg);
+    console.error(`[IMAGE_ANALYSIS] Server error handling /api/analyze: ${errorMsg}`);
+    console.error('[IMAGE_ANALYSIS] HTTP Response: 500 Internal Server Error');
     res.status(500).json({ error: `Failed to complete analysis: ${errorMsg}` });
   }
 });
